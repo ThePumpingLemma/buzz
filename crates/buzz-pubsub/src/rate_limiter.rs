@@ -16,6 +16,7 @@ use buzz_auth::{
 use buzz_core::TenantContext;
 use nostr::PublicKey;
 use redis::Script;
+use tracing::Instrument;
 
 /// Atomically INCR the key, set EXPIRE on first call, and return (count, ttl).
 ///
@@ -52,6 +53,7 @@ async fn run_rate_limit(
         .key(key)
         .arg(window_secs as i64)
         .invoke_async(&mut *conn)
+        .instrument(tracing::info_span!(target: "buzz_datastore", "EVAL", otel.kind = "client", db.system.name = "redis", db.operation.name = "EVAL"))
         .await
         .map_err(|e| AuthError::Internal(format!("Redis rate limit script: {e}")))?;
 
@@ -63,6 +65,7 @@ async fn run_rate_limit(
             .arg(key)
             .arg(window_secs as i64)
             .query_async(&mut *conn)
+            .instrument(tracing::info_span!(target: "buzz_datastore", "EXPIRE", otel.kind = "client", db.system.name = "redis", db.operation.name = "EXPIRE"))
             .await
             .map_err(|e| AuthError::Internal(format!("Redis EXPIRE repair: {e}")))?;
         // After repair, the window resets to the full duration.

@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use buzz_core::tenant::{CommunityId, TenantContext};
 
@@ -11,9 +12,38 @@ use bytes::Bytes;
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
 use serde::{Deserialize, Serialize};
+use tracing::Instrument as _;
 
 /// A stream of byte chunks from S3, usable with `axum::body::Body::from_stream()`.
 pub type ByteStream = Pin<Box<dyn futures_core::Stream<Item = Result<Bytes, MediaError>> + Send>>;
+
+struct InstrumentedByteStream {
+    inner: ByteStream,
+    span: Option<tracing::Span>,
+}
+
+impl futures_core::Stream for InstrumentedByteStream {
+    type Item = Result<Bytes, MediaError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let span = this.span.clone();
+        let _entered = span.as_ref().map(tracing::Span::enter);
+        let poll = this.inner.as_mut().poll_next(cx);
+        drop(_entered);
+        if matches!(poll, Poll::Ready(None) | Poll::Ready(Some(Err(_)))) {
+            this.span.take();
+        }
+        poll
+    }
+}
+
+fn instrument_byte_stream(inner: ByteStream, span: tracing::Span) -> ByteStream {
+    Box::pin(InstrumentedByteStream {
+        inner,
+        span: Some(span),
+    })
+}
 
 /// S3-compatible object storage client.
 pub struct MediaStorage {
@@ -70,6 +100,7 @@ impl MediaStorage {
     ///
     /// Used for images, sidecars, and thumbnails. For large video files use
     /// [`put_file`] to avoid loading the entire blob into RAM.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     pub async fn put(&self, key: &str, bytes: &[u8], content_type: &str) -> Result<(), MediaError> {
         self.bucket
             .put_object_with_content_type(key, bytes, content_type)
@@ -82,6 +113,7 @@ impl MediaStorage {
     /// Uses rust-s3's `put_object_stream_with_content_type` which reads from
     /// the file incrementally via an 8 MiB `BufReader`. The full file is never
     /// held in memory simultaneously. Intended for video blobs (up to 500 MB).
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     pub async fn put_file(
         &self,
         key: &str,
@@ -102,6 +134,7 @@ impl MediaStorage {
     }
 
     /// Retrieve an object's bytes.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.GetObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject"))]
     pub async fn get(&self, key: &str) -> Result<Vec<u8>, MediaError> {
         match self.bucket.get_object(key).await {
             Ok(response) => Ok(response.to_vec()),
@@ -115,6 +148,7 @@ impl MediaStorage {
     /// `start` and `end` are inclusive byte offsets. Only the requested slice
     /// is transferred from S3 — the full object is never loaded into RAM.
     /// Intended for HTTP 206 range responses on large video blobs.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.GetObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject"))]
     pub async fn get_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>, MediaError> {
         match self.bucket.get_object_range(key, start, Some(end)).await {
             Ok(response) => Ok(response.to_vec()),
@@ -129,9 +163,11 @@ impl MediaStorage {
     /// The full object is never buffered — intended for streaming large
     /// blobs (video) directly into HTTP responses via `Body::from_stream()`.
     pub async fn get_stream(&self, key: &str) -> Result<ByteStream, MediaError> {
+        let span = tracing::info_span!(target: "buzz_datastore", "S3.GetObject", otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject");
         let response = self
             .bucket
             .get_object_stream(key)
+            .instrument(span.clone())
             .await
             .map_err(|e| MediaError::StorageError(e.to_string()))?;
 
@@ -142,10 +178,11 @@ impl MediaStorage {
         let stream = futures_util::StreamExt::map(response.bytes, |chunk| {
             chunk.map_err(|e| MediaError::StorageError(e.to_string()))
         });
-        Ok(Box::pin(stream))
+        Ok(instrument_byte_stream(Box::pin(stream), span))
     }
 
     /// Check if an object exists. Returns false on 404.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.HeadObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "HeadObject"))]
     pub async fn head(&self, key: &str) -> Result<bool, MediaError> {
         match self.bucket.head_object(key).await {
             Ok(_) => Ok(true),
@@ -155,6 +192,7 @@ impl MediaStorage {
     }
 
     /// Delete an object. Returns an error on failure — callers decide whether to propagate.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.DeleteObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "DeleteObject"))]
     pub async fn delete(&self, key: &str) -> Result<(), MediaError> {
         self.bucket
             .delete_object(key)
@@ -164,6 +202,7 @@ impl MediaStorage {
     }
 
     /// HEAD with metadata — returns Content-Length (size).
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.HeadObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "HeadObject"))]
     pub async fn head_with_metadata(&self, key: &str) -> Result<Option<BlobHeadMeta>, MediaError> {
         match self.bucket.head_object(key).await {
             Ok((result, _)) => Ok(Some(BlobHeadMeta {
@@ -190,6 +229,7 @@ impl MediaStorage {
     }
 
     /// Read community-scoped sidecar JSON for a given sha256 (bare hash).
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.GetObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject"))]
     pub async fn get_sidecar(
         &self,
         ctx: &TenantContext,
@@ -239,6 +279,7 @@ impl MediaStorage {
     /// `max_keys` bounds one HTTP response, not the sweep's total object
     /// cap — the caller (`fold_bucket_listing`) enforces the cumulative cap
     /// across pages.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.ListObjectsV2", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "ListObjectsV2"))]
     pub async fn list_page(
         &self,
         continuation_token: Option<String>,
@@ -270,6 +311,36 @@ impl MediaStorage {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tracing_subscriber::prelude::*;
+
+    #[derive(Clone, Default)]
+    struct SpanLifetimeLayer {
+        created: Arc<AtomicUsize>,
+        closed: Arc<AtomicUsize>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for SpanLifetimeLayer {
+        fn on_new_span(
+            &self,
+            attrs: &tracing::span::Attributes<'_>,
+            _id: &tracing::span::Id,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if attrs.metadata().name() == "S3.GetObject" {
+                self.created.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        fn on_close(
+            &self,
+            _id: tracing::span::Id,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.closed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     fn tenant(n: u128) -> TenantContext {
         TenantContext::resolved(
@@ -328,6 +399,54 @@ mod tests {
             err.to_string().contains("must be configured together"),
             "unexpected error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn streaming_span_lives_until_stream_exhaustion_or_drop() {
+        use futures_util::StreamExt as _;
+
+        let layer = SpanLifetimeLayer::default();
+        let created = Arc::clone(&layer.created);
+        let closed = Arc::clone(&layer.closed);
+        let subscriber = tracing_subscriber::registry().with(layer);
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let inner: ByteStream = Box::pin(futures_util::stream::iter([Ok(Bytes::from_static(
+            b"chunk",
+        ))]));
+        let span = tracing::info_span!(target: "buzz_datastore", "S3.GetObject");
+        let mut stream = instrument_byte_stream(inner, span);
+        assert_eq!(created.load(Ordering::SeqCst), 1);
+        assert_eq!(closed.load(Ordering::SeqCst), 0);
+
+        assert!(stream.next().await.is_some());
+        assert!(stream.next().await.is_none());
+        assert_eq!(closed.load(Ordering::SeqCst), 1);
+        drop(stream);
+
+        let inner: ByteStream = Box::pin(futures_util::stream::pending());
+        let stream = instrument_byte_stream(
+            inner,
+            tracing::info_span!(target: "buzz_datastore", "S3.GetObject"),
+        );
+        assert_eq!(created.load(Ordering::SeqCst), 2);
+        assert_eq!(closed.load(Ordering::SeqCst), 1);
+        drop(stream);
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+
+        let inner: ByteStream = Box::pin(futures_util::stream::iter([Err(
+            MediaError::StorageError("sentinel stream error".to_string()),
+        )]));
+        let mut stream = instrument_byte_stream(
+            inner,
+            tracing::info_span!(target: "buzz_datastore", "S3.GetObject"),
+        );
+        assert_eq!(created.load(Ordering::SeqCst), 3);
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+        assert!(matches!(stream.next().await, Some(Err(_))));
+        assert_eq!(closed.load(Ordering::SeqCst), 3);
+        drop(stream);
+        assert_eq!(closed.load(Ordering::SeqCst), 3);
     }
 
     #[test]

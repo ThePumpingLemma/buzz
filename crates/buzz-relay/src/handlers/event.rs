@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::body::Bytes;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument as _};
 
 use buzz_core::event::StoredEvent;
 use buzz_core::kind::{
@@ -346,6 +346,11 @@ pub(crate) async fn dispatch_persistent_event(
     let state = Arc::clone(state);
     let stored_event = stored_event.clone();
     let actor_pubkey_hex = actor_pubkey_hex.to_owned();
+    let detached = tracing::info_span!(
+        target: "buzz_datastore",
+        "persistent_event_dispatch",
+        otel.kind = "internal"
+    );
 
     metrics::counter!("buzz_post_commit_dispatch_scheduled_total").increment(1);
     tokio::spawn(async move {
@@ -357,6 +362,7 @@ pub(crate) async fn dispatch_persistent_event(
             &actor_pubkey_hex,
             false,
             threaded_visibility,
+            Some(detached),
         )
         .await;
         debug!(
@@ -378,6 +384,7 @@ async fn dispatch_persistent_event_inner(
     actor_pubkey_hex: &str,
     enqueue_audit: bool,
     threaded_visibility: Option<crate::state::ThreadedChannelVisibility>,
+    datastore_parent: Option<tracing::Span>,
 ) -> usize {
     // No `crate::conformance` emit here — the spec doesn't have a
     // separate fan-out action. Acceptance was already recorded at the
@@ -392,11 +399,14 @@ async fn dispatch_persistent_event_inner(
         None => EventTopic::Global,
     };
     state.mark_local_event(tenant.community(), &stored_event.event.id);
-    if let Err(e) = state
+    let publish = state
         .pubsub
-        .publish_event(tenant, topic, &stored_event.event)
-        .await
-    {
+        .publish_event(tenant, topic, &stored_event.event);
+    let publish_result = match datastore_parent {
+        Some(parent) => publish.instrument(parent).await,
+        None => publish.await,
+    };
+    if let Err(e) = publish_result {
         state
             .local_event_ids
             .invalidate(&(tenant.community(), stored_event.event.id.to_bytes()));
@@ -1781,6 +1791,7 @@ mod tests {
                 &actor_hex,
                 true,
                 None,
+                None,
             )
             .await;
 
@@ -1883,6 +1894,7 @@ mod tests {
                 &actor_hex,
                 true,
                 None,
+                None,
             )
             .await;
             super::super::dispatch_persistent_event_inner(
@@ -1892,6 +1904,7 @@ mod tests {
                 KIND_PRESENCE_UPDATE,
                 &actor_hex,
                 true,
+                None,
                 None,
             )
             .await;

@@ -269,6 +269,7 @@ impl PubSubManager {
     /// the local cache is already dropped synchronously; this carries the same
     /// drop cross-pod. A dropped publish is backstopped by the REQ denial-path
     /// DB confirmation, so callers may spawn this without awaiting delivery.
+    #[tracing::instrument(target = "buzz_datastore", name = "PUBLISH", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "PUBLISH"))]
     pub async fn publish_cache_invalidation(
         &self,
         ctx: &TenantContext,
@@ -289,6 +290,7 @@ impl PubSubManager {
     /// and calls this to reach the banned member's sockets on other pods. The DB
     /// ban row is the durable backstop, so a dropped publish still refuses the
     /// next auth attempt; callers may spawn this without awaiting delivery.
+    #[tracing::instrument(target = "buzz_datastore", name = "PUBLISH", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "PUBLISH"))]
     pub async fn publish_conn_control(
         &self,
         ctx: &TenantContext,

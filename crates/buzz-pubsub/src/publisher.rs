@@ -19,6 +19,7 @@ pub fn global_key(ctx: &TenantContext) -> String {
 }
 
 /// Returns the number of subscribers that received the message.
+#[tracing::instrument(target = "buzz_datastore", name = "PUBLISH", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "PUBLISH"))]
 pub async fn publish_event(
     pool: &Pool,
     ctx: &TenantContext,

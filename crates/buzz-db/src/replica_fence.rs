@@ -142,6 +142,7 @@ impl Default for ReplicaFence {
 ///
 /// This is a name-and-shape check only; it cannot detect a sabotaged
 /// function body. [`verify_floor_guard_behavior`] proves the semantics.
+#[tracing::instrument(target = "buzz_datastore", name = "replica_fence_verify_catalog", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
 pub async fn verify_floor_guard_catalog(pool: &PgPool) -> crate::Result<()> {
     // tgtype bits: 1 = ROW, 2 = BEFORE, 4 = INSERT, 16 = UPDATE, 64 = INSTEAD.
     // Required: ROW + INSERT + UPDATE set, BEFORE + INSTEAD clear.
@@ -196,6 +197,7 @@ pub async fn verify_floor_guard_catalog(pool: &PgPool) -> crate::Result<()> {
 /// `SET CONSTRAINTS ALL IMMEDIATE` makes the deferred trigger fire per
 /// statement so each adversary is observable under a savepoint; deferral to
 /// COMMIT is separately pinned by the held-transaction fixture.
+#[tracing::instrument(target = "buzz_datastore", name = "replica_fence_verify_behavior", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
 pub async fn verify_floor_guard_behavior(pool: &PgPool) -> crate::Result<()> {
     use crate::error::DbError;
 
@@ -363,6 +365,7 @@ pub enum ProbeError {
 /// The three statements are separately awaited on a single pinned connection;
 /// a single SELECT would not guarantee evaluation order across the
 /// subexpressions, reopening the race this ordering exists to close.
+#[tracing::instrument(target = "buzz_datastore", name = "replica_fence_sample_writer", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
 async fn sample_writer(writer: &PgPool) -> Result<WriterSample, ProbeError> {
     let mut conn = writer.acquire().await?;
 
@@ -443,6 +446,7 @@ async fn sample_writer(writer: &PgPool) -> Result<WriterSample, ProbeError> {
 /// rather than NULL, so NULL-checking alone would not reliably detect a
 /// misrouted "replica" URL. Not-in-recovery, NULL replay LSN, or Aurora
 /// hiding either is an error → fence closes.
+#[tracing::instrument(target = "buzz_datastore", name = "replica_fence_check_replica", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
 async fn replica_covers(replica: &PgPool, wal_lsn: &str) -> Result<bool, ProbeError> {
     let covered: Option<bool> = sqlx::query_scalar(
         r#"

@@ -8,6 +8,7 @@ use buzz_core::TenantContext;
 use deadpool_redis::Pool;
 use nostr::PublicKey;
 use std::collections::HashMap;
+use tracing::Instrument;
 
 use crate::error::PubSubError;
 use crate::topic::BUZZ_PREFIX;
@@ -25,6 +26,7 @@ pub fn presence_key(ctx: &TenantContext, pubkey: &PublicKey) -> String {
 }
 
 /// Sets presence status for `pubkey` with a [`PRESENCE_TTL_SECS`]-second TTL.
+#[tracing::instrument(target = "buzz_datastore", name = "SET", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "SET"))]
 pub async fn set_presence(
     pool: &Pool,
     ctx: &TenantContext,
@@ -44,6 +46,7 @@ pub async fn set_presence(
 }
 
 /// Removes the presence entry for `pubkey`. Call on clean disconnect.
+#[tracing::instrument(target = "buzz_datastore", name = "DEL", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "DEL"))]
 pub async fn clear_presence(
     pool: &Pool,
     ctx: &TenantContext,
@@ -59,6 +62,7 @@ pub async fn clear_presence(
 }
 
 /// Returns the current presence status for `pubkey`, or `None` if not set or expired.
+#[tracing::instrument(target = "buzz_datastore", name = "GET", skip_all, fields(otel.kind = "client", db.system.name = "redis", db.operation.name = "GET"))]
 pub async fn get_presence(
     pool: &Pool,
     ctx: &TenantContext,
@@ -84,7 +88,11 @@ pub async fn get_presence_bulk(
         .iter()
         .map(|pubkey| presence_key(ctx, pubkey))
         .collect();
-    let values: Vec<Option<String>> = redis::cmd("MGET").arg(&keys).query_async(&mut conn).await?;
+    let values: Vec<Option<String>> = redis::cmd("MGET")
+        .arg(&keys)
+        .query_async(&mut conn)
+        .instrument(tracing::info_span!(target: "buzz_datastore", "MGET", otel.kind = "client", db.system.name = "redis", db.operation.name = "MGET"))
+        .await?;
     let result = pubkeys
         .iter()
         .zip(values.iter())

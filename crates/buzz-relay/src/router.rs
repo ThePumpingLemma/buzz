@@ -17,6 +17,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
+use tracing::Instrument as _;
 
 use crate::api;
 use crate::audio;
@@ -363,7 +364,12 @@ async fn readiness_handler(State(state): State<Arc<AppState>>) -> impl IntoRespo
 
     let check = async {
         let (pg_ok, redis_ok) = tokio::join!(state.db.ping(), async {
-            state.redis_pool.get().await.is_ok()
+            state
+                .redis_pool
+                .get()
+                .instrument(tracing::info_span!(target: "buzz_datastore", "CONNECT", otel.kind = "client", db.system.name = "redis", db.operation.name = "CONNECT"))
+                .await
+                .is_ok()
         },);
         (pg_ok, redis_ok)
     };

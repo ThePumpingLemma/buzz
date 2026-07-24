@@ -10,6 +10,7 @@ use std::time::Duration;
 use buzz_core::CommunityId;
 use buzz_relay_mesh::{FencedHeader, MeshError, Profile, RuntimeId};
 use redis::Script;
+use tracing::Instrument;
 use uuid::Uuid;
 
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
@@ -215,6 +216,7 @@ impl SessionDirectory {
                 .arg(profile.as_wire_str())
                 .arg(ttl_ms)
                 .invoke_async(&mut *conn)
+                .instrument(redis_span("EVAL"))
                 .await?;
         let lease = parse_lease(community_id, session_id, &value)?;
         match status.as_str() {
@@ -254,6 +256,7 @@ impl SessionDirectory {
             .arg(lease.generation)
             .arg(ttl_ms)
             .invoke_async(&mut *conn)
+            .instrument(redis_span("EVAL"))
             .await?;
         let current = parse_optional_lease(lease.community_id, lease.session_id, &value)?;
         match status.as_str() {
@@ -284,6 +287,7 @@ impl SessionDirectory {
                 .arg(lease.owner_runtime_id.to_hex())
                 .arg(lease.generation)
                 .invoke_async(&mut *conn)
+                .instrument(redis_span("EVAL"))
                 .await?;
         let current = parse_optional_lease(lease.community_id, lease.session_id, &value)?;
         match status.as_str() {
@@ -313,6 +317,7 @@ impl SessionDirectory {
         let value: Option<String> = redis::cmd("GET")
             .arg(&keys.lease)
             .query_async(&mut *conn)
+            .instrument(redis_span("GET"))
             .await?;
         value
             .as_deref()
@@ -331,6 +336,7 @@ impl SessionDirectory {
         let value: Option<String> = redis::cmd("GET")
             .arg(&keys.generation)
             .query_async(&mut *conn)
+            .instrument(redis_span("GET"))
             .await?;
         match value.as_deref() {
             Some(value) => parse_optional_generation(community_id, session_id, value),
@@ -360,6 +366,7 @@ impl SessionDirectory {
             .key(&keys.lease)
             .key(&keys.generation)
             .invoke_async(&mut *conn)
+            .instrument(redis_span("EVAL"))
             .await?;
         let known_from_counter =
             parse_optional_generation(community_id, fenced.session_id, &known_generation)
@@ -436,6 +443,17 @@ impl SessionDirectory {
         }
 
         Ok(())
+    }
+}
+
+fn redis_span(operation: &'static str) -> tracing::Span {
+    match operation {
+        "GET" => {
+            tracing::info_span!(target: "buzz_datastore", "GET", otel.kind = "client", db.system.name = "redis", db.operation.name = "GET")
+        }
+        _ => {
+            tracing::info_span!(target: "buzz_datastore", "EVAL", otel.kind = "client", db.system.name = "redis", db.operation.name = "EVAL")
+        }
     }
 }
 

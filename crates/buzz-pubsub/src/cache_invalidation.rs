@@ -15,6 +15,7 @@ use buzz_core::{CommunityId, TenantContext};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::topic::BUZZ_PREFIX;
@@ -130,9 +131,14 @@ async fn connect_and_subscribe(
     broadcast_tx: &broadcast::Sender<ScopedCacheInvalidation>,
 ) -> Result<(), redis::RedisError> {
     let client = redis::Client::open(redis_url)?;
-    let mut conn = client.get_async_pubsub().await?;
+    let mut conn = client
+        .get_async_pubsub()
+        .instrument(tracing::info_span!(target: "buzz_datastore", "CONNECT", otel.kind = "client", db.system.name = "redis", db.operation.name = "CONNECT"))
+        .await?;
 
-    conn.psubscribe(CACHE_INVALIDATION_PATTERN).await?;
+    conn.psubscribe(CACHE_INVALIDATION_PATTERN)
+        .instrument(tracing::info_span!(target: "buzz_datastore", "PSUBSCRIBE", otel.kind = "client", db.system.name = "redis", db.operation.name = "PSUBSCRIBE"))
+        .await?;
 
     tracing::info!(
         "Redis cache-invalidation subscriber connected — listening on {CACHE_INVALIDATION_PATTERN}"

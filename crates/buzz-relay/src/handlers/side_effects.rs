@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use nostr::{Event, EventBuilder, Kind, Tag};
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument as _};
 use uuid::Uuid;
 
 use buzz_core::kind::{
@@ -729,10 +729,16 @@ pub fn emit_live_thread_summary(
 ) {
     let tenant = tenant.clone();
     let state = Arc::clone(state);
+    let detached = tracing::info_span!(
+        target: "buzz_datastore",
+        "live_thread_summary",
+        otel.kind = "internal"
+    );
     tokio::spawn(async move {
         let summary = match state
             .db
             .get_thread_summary(tenant.community(), &root_id)
+            .instrument(detached.clone())
             .await
         {
             Ok(Some(summary)) => summary,
@@ -792,6 +798,7 @@ pub fn emit_live_thread_summary(
         if let Err(e) = state
             .pubsub
             .publish_event(&tenant, EventTopic::Channel(channel_id), &event)
+            .instrument(detached)
             .await
         {
             state

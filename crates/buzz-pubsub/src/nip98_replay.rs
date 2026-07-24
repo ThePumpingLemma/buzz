@@ -11,6 +11,7 @@ use buzz_auth::{
     },
 };
 use nostr::EventId;
+use tracing::Instrument;
 
 /// Redis-backed NIP-98 replay seen-set.
 ///
@@ -70,6 +71,7 @@ impl Nip98ReplayGuard for RedisNip98ReplayGuard {
                 .arg("EX")
                 .arg(ttl)
                 .query_async(&mut *conn)
+                .instrument(tracing::info_span!(target: "buzz_datastore", "SET", otel.kind = "client", db.system.name = "redis", db.operation.name = "SET"))
                 .await
                 .map_err(|e| {
                     tracing::warn!(

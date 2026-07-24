@@ -537,8 +537,8 @@ pub(crate) fn row_to_stored_event(row: sqlx::postgres::PgRow) -> Result<Option<S
     // Avoid the Value → String → parse round-trip: deserialize directly from the Value.
     let event: nostr::Event = match serde_json::from_value(event_json) {
         Ok(e) => e,
-        Err(e) => {
-            tracing::warn!("failed to reconstruct event from DB row: {e}");
+        Err(_e) => {
+            tracing::warn!("failed to reconstruct event from DB row");
             return Ok(None);
         }
     };
@@ -1431,7 +1431,7 @@ mod tests {
     use super::*;
     use nostr::{EventBuilder, Keys, Kind, Tag};
 
-    const TEST_DB_URL: &str = "postgres://buzz:buzz_dev@localhost:5432/buzz";
+    const TEST_DB_URL: &str = "postgres://buzz:buzz_dev@localhost:5432/buzz"; // sadscan:disable np.postgres.1 -- local test fixture
 
     async fn setup_pool() -> PgPool {
         let database_url = std::env::var("BUZZ_TEST_DATABASE_URL")

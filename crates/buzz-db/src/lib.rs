@@ -128,11 +128,7 @@ pub async fn insert_mentions(
         .into_iter()
         .filter(|pk| {
             if pk.len() != 64 || !pk.chars().all(|c| c.is_ascii_hexdigit()) {
-                tracing::debug!(
-                    event_id = %event.id,
-                    invalid_ptag = pk,
-                    "skipping malformed p-tag in insert_mentions"
-                );
+                tracing::debug!("skipping malformed p-tag in insert_mentions");
                 false
             } else {
                 true
@@ -212,6 +208,7 @@ impl UsageMetricsLeader {
     ///
     /// Bounded to 5 seconds — a blackholed connection (no RST) would otherwise
     /// stall the entire poller tick until the OS TCP timeout.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_metrics_leader_is_live", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_live(&mut self) -> bool {
         tokio::time::timeout(std::time::Duration::from_secs(5), self.connection.ping())
             .await
@@ -477,11 +474,13 @@ impl Db {
     }
 
     /// Run pending database migrations.
+    #[tracing::instrument(target = "buzz_datastore", name = "migrate", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn migrate(&self) -> Result<()> {
         migration::run_migrations(&self.pool).await
     }
 
     /// Returns `true` if the database is reachable (used by readiness probes).
+    #[tracing::instrument(target = "buzz_datastore", name = "ping", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn ping(&self) -> bool {
         sqlx::query("SELECT 1").execute(&self.pool).await.is_ok()
     }
@@ -514,6 +513,7 @@ impl Db {
     /// detached from the shared pool so a stable leader neither returns a locked
     /// session to other callers nor permanently consumes a pool slot. Dropping the
     /// guard closes the connection and releases the session-scoped lock.
+    #[tracing::instrument(target = "buzz_datastore", name = "try_lock_usage_metrics", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn try_lock_usage_metrics(
         &self,
         lock_key: i64,
@@ -534,6 +534,7 @@ impl Db {
 
     /// List reports for the deployment-global read-only admin plane.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "admin_list_reports", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn admin_list_reports(
         &self,
         community_id: Option<Uuid>,
@@ -560,6 +561,7 @@ impl Db {
     }
 
     /// Fetch one report for the deployment-global read-only admin plane.
+    #[tracing::instrument(target = "buzz_datastore", name = "admin_get_report", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn admin_get_report(
         &self,
         id: Uuid,
@@ -568,6 +570,7 @@ impl Db {
     }
 
     /// List feedback for the deployment-global read-only admin plane.
+    #[tracing::instrument(target = "buzz_datastore", name = "admin_list_feedback", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn admin_list_feedback(
         &self,
         limit: i64,
@@ -576,6 +579,7 @@ impl Db {
     }
 
     /// Fetch one feedback submission for the deployment-global admin plane.
+    #[tracing::instrument(target = "buzz_datastore", name = "admin_get_feedback", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn admin_get_feedback(
         &self,
         id: Uuid,
@@ -584,36 +588,43 @@ impl Db {
     }
 
     /// Return total number of communities on this relay.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_community_count", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_community_count(&self) -> Result<i64> {
         usage::community_count(&self.pool).await
     }
 
     /// Return per-community user counts split by human/agent.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_user_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_user_counts(&self) -> Result<Vec<usage::CommunityUserCounts>> {
         usage::user_counts(&self.pool).await
     }
 
     /// Return per-community channel counts by type.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_channel_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_channel_counts(&self) -> Result<Vec<usage::CommunityChannelCount>> {
         usage::channel_counts(&self.pool).await
     }
 
     /// Return per-community kind=9 message counts.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_message_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_message_counts(&self) -> Result<Vec<usage::CommunityMessageCount>> {
         usage::message_counts(&self.pool).await
     }
 
     /// Return per-community relay-member counts by role.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_relay_member_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_relay_member_counts(&self) -> Result<Vec<usage::CommunityMemberCount>> {
         usage::relay_member_counts(&self.pool).await
     }
 
     /// Return per-community workflow counts by status.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_workflow_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_workflow_counts(&self) -> Result<Vec<usage::CommunityWorkflowCount>> {
         usage::workflow_counts(&self.pool).await
     }
 
     /// Return per-community git-repo counts.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_git_repo_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_git_repo_counts(&self) -> Result<Vec<usage::CommunityGitRepoCount>> {
         usage::git_repo_counts(&self.pool).await
     }
@@ -621,6 +632,7 @@ impl Db {
     /// Return per-community distinct active-user counts for a given SQL interval.
     ///
     /// `interval_sql` must be a trusted literal such as `"1 day"` or `"7 days"`.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_active_user_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_active_user_counts(
         &self,
         interval_sql: &'static str,
@@ -629,6 +641,7 @@ impl Db {
     }
 
     /// Return per-community active-channel counts for a given SQL interval.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_active_channel_counts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_active_channel_counts(
         &self,
         interval_sql: &'static str,
@@ -637,6 +650,7 @@ impl Db {
     }
 
     /// Return all community id → host mappings.
+    #[tracing::instrument(target = "buzz_datastore", name = "usage_community_hosts", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn usage_community_hosts(&self) -> Result<Vec<usage::CommunityHost>> {
         usage::community_hosts(&self.pool).await
     }
@@ -653,6 +667,7 @@ impl Db {
     ///
     /// The caller owns host normalization and turns `None` into the fail-closed
     /// request/connection error. buzz-db only reads the durable host map.
+    #[tracing::instrument(target = "buzz_datastore", name = "lookup_community_by_host", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn lookup_community_by_host(
         &self,
         normalized_host: &str,
@@ -682,6 +697,7 @@ impl Db {
     }
 
     /// Returns whether a community id still exists in the active lifecycle state.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_community_active", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_community_active(&self, community_id: CommunityId) -> Result<bool> {
         let active = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM communities WHERE id = $1 AND archived_at IS NULL)",
@@ -693,6 +709,7 @@ impl Db {
     }
 
     /// Returns a community by host regardless of lifecycle state. Operator-plane only.
+    #[tracing::instrument(target = "buzz_datastore", name = "lookup_community_by_host_for_management", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn lookup_community_by_host_for_management(
         &self,
         normalized_host: &str,
@@ -714,6 +731,7 @@ impl Db {
     ///
     /// This is an operator-plane helper, not a tenant-scoped data-plane read:
     /// callers must gate it on deployment-level operator auth before exposing it.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_communities_owned_by", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_communities_owned_by(
         &self,
         owner_pubkey: &str,
@@ -759,6 +777,7 @@ impl Db {
     /// fan out under *that* community rather than the deployment default. The
     /// community is authoritative; the host is read back for labelling only and
     /// is never used to re-derive the community.
+    #[tracing::instrument(target = "buzz_datastore", name = "lookup_community_host", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn lookup_community_host(&self, community_id: CommunityId) -> Result<Option<String>> {
         let row = sqlx::query(
             r#"
@@ -783,6 +802,7 @@ impl Db {
     ///
     /// Set by relay admins/owners via the kind:9033 command; the value is
     /// validated and size-capped at that write path.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_community_icon", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_community_icon(&self, community_id: CommunityId) -> Result<Option<String>> {
         let row = sqlx::query(
             r#"
@@ -803,6 +823,7 @@ impl Db {
     }
 
     /// Sets or clears (`None`) the community's workspace icon.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_community_icon", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_community_icon(
         &self,
         community_id: CommunityId,
@@ -827,6 +848,7 @@ impl Db {
     /// This is the startup/config seeding path for N=1 deployments. Migrations
     /// create the schema only; deployment-specific hosts are not hardcoded into
     /// schema history.
+    #[tracing::instrument(target = "buzz_datastore", name = "ensure_configured_community", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn ensure_configured_community(
         &self,
         normalized_host: &str,
@@ -859,6 +881,7 @@ impl Db {
     /// Holds a per-owner advisory lock while enforcing the ownership limit.
     /// Identical create retries return the original record; host collisions and
     /// limit failures remain distinguishable to the operator API.
+    #[tracing::instrument(target = "buzz_datastore", name = "create_community_with_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_community_with_owner(
         &self,
         normalized_host: &str,
@@ -944,6 +967,7 @@ impl Db {
     }
 
     /// Idempotently archives a community when the asserted pubkey is its current owner.
+    #[tracing::instrument(target = "buzz_datastore", name = "archive_community_owned_by", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn archive_community_owned_by(
         &self,
         normalized_host: &str,
@@ -977,6 +1001,7 @@ impl Db {
     }
 
     /// Idempotently restores a community when the asserted pubkey is its current owner.
+    #[tracing::instrument(target = "buzz_datastore", name = "unarchive_community_owned_by", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn unarchive_community_owned_by(
         &self,
         normalized_host: &str,
@@ -1009,6 +1034,7 @@ impl Db {
     ///
     /// Internal relay producers use this to derive tenant context from the row
     /// they are acting on, rather than falling back to an implicit default.
+    #[tracing::instrument(target = "buzz_datastore", name = "community_of_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn community_of_channel(&self, channel_id: Uuid) -> Result<Option<CommunityId>> {
         let row = sqlx::query(
             r#"
@@ -1047,6 +1073,7 @@ impl Db {
     /// are intentionally not present rather than mapped to a default —
     /// callers MUST treat "channel-id not in map" as a coverage breach,
     /// never as "use the resolved community".
+    #[tracing::instrument(target = "buzz_datastore", name = "communities_of_channels", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn communities_of_channels(
         &self,
         channel_ids: &[Uuid],
@@ -1076,6 +1103,7 @@ impl Db {
     }
 
     /// Inserts an event. Returns `(StoredEvent, was_inserted)` — `false` on duplicate.
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_event(
         &self,
         community_id: CommunityId,
@@ -1084,25 +1112,28 @@ impl Db {
     ) -> Result<(StoredEvent, bool)> {
         let result = event::insert_event(&self.pool, community_id, event, channel_id).await?;
         if result.1 {
-            if let Err(e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
-                tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+            if let Err(_e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
+                tracing::warn!("mention insertion failed");
             }
         }
         Ok(result)
     }
 
     /// Queries events matching the given filter parameters.
+    #[tracing::instrument(target = "buzz_datastore", name = "query_events", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn query_events(&self, q: &EventQuery) -> Result<Vec<StoredEvent>> {
         event::query_events(&self.pool, q).await
     }
 
     /// Count events matching the given query (NIP-45 COUNT support).
+    #[tracing::instrument(target = "buzz_datastore", name = "count_events", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn count_events(&self, q: &EventQuery) -> Result<i64> {
         event::count_events(&self.pool, q).await
     }
 
     /// Return whether a creator-signed huddle-start event links a parent
     /// channel to an ephemeral huddle channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "huddle_started_link_exists", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn huddle_started_link_exists(
         &self,
         community_id: CommunityId,
@@ -1125,6 +1156,7 @@ impl Db {
     /// Uses canonical NIP-16 ordering: `created_at DESC, id ASC`.
     /// This matches the write path in [`replace_addressable_event`] and handles
     /// historical duplicate survivors correctly.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_latest_global_replaceable", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_latest_global_replaceable(
         &self,
         community_id: CommunityId,
@@ -1137,6 +1169,7 @@ impl Db {
     /// Fetches a single non-deleted event by its raw ID bytes.
     ///
     /// Returns `None` if the event does not exist or has been soft-deleted.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_event_by_id", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_event_by_id(
         &self,
         community_id: CommunityId,
@@ -1146,6 +1179,7 @@ impl Db {
     }
 
     /// Fetches a single event by its raw ID bytes, **including soft-deleted rows**.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_event_by_id_including_deleted", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_event_by_id_including_deleted(
         &self,
         community_id: CommunityId,
@@ -1155,6 +1189,7 @@ impl Db {
     }
 
     /// Soft-deletes an event. Returns `Ok(true)` if deleted, `Ok(false)` if already deleted.
+    #[tracing::instrument(target = "buzz_datastore", name = "soft_delete_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn soft_delete_event(
         &self,
         community_id: CommunityId,
@@ -1165,6 +1200,7 @@ impl Db {
 
     /// Soft-delete the live row for an addressable coordinate `(kind, pubkey, d_tag)`.
     /// Used by NIP-09 a-tag deletion for parameterized-replaceable kinds.
+    #[tracing::instrument(target = "buzz_datastore", name = "soft_delete_by_coordinate", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn soft_delete_by_coordinate(
         &self,
         community_id: CommunityId,
@@ -1176,6 +1212,7 @@ impl Db {
     }
 
     /// Atomically soft-delete an event and decrement thread reply counters.
+    #[tracing::instrument(target = "buzz_datastore", name = "soft_delete_event_and_update_thread", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn soft_delete_event_and_update_thread(
         &self,
         community_id: CommunityId,
@@ -1194,6 +1231,7 @@ impl Db {
     }
 
     /// Returns the most recent `created_at` for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_last_message_at", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_last_message_at(
         &self,
         community_id: CommunityId,
@@ -1203,6 +1241,7 @@ impl Db {
     }
 
     /// Bulk-fetch the most recent `created_at` for a set of channel IDs.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_last_message_at_bulk", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_last_message_at_bulk(
         &self,
         community_id: CommunityId,
@@ -1212,6 +1251,7 @@ impl Db {
     }
 
     /// Batch-fetch non-deleted events by their raw IDs.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_events_by_ids", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_events_by_ids(
         &self,
         community_id: CommunityId,
@@ -1221,6 +1261,7 @@ impl Db {
     }
 
     /// Exclusively claim a batch of due matcher jobs from one community.
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_due_push_match_batch", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_due_push_match_batch(
         &self,
         limit: i64,
@@ -1230,6 +1271,7 @@ impl Db {
     }
 
     /// Load active endpoint-enabled leases eligible for push matching.
+    #[tracing::instrument(target = "buzz_datastore", name = "active_push_match_leases", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn active_push_match_leases(
         &self,
         community: CommunityId,
@@ -1238,6 +1280,7 @@ impl Db {
     }
 
     /// Complete matcher jobs from one claimed batch while the fence holds.
+    #[tracing::instrument(target = "buzz_datastore", name = "complete_push_match_batch", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn complete_push_match_batch(
         &self,
         community: CommunityId,
@@ -1248,6 +1291,7 @@ impl Db {
     }
 
     /// Release fenced matcher claims from one batch for retry.
+    #[tracing::instrument(target = "buzz_datastore", name = "retry_push_match_batch", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn retry_push_match_batch(
         &self,
         community: CommunityId,
@@ -1259,11 +1303,13 @@ impl Db {
     }
 
     /// Delete exhausted matcher jobs (periodic sweep, off the claim path).
+    #[tracing::instrument(target = "buzz_datastore", name = "reap_exhausted_push_matches", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn reap_exhausted_push_matches(&self) -> Result<u64> {
         push::reap_exhausted_matches(&self.pool).await
     }
 
     /// Idempotently enqueue a wake for a matched lease and event.
+    #[tracing::instrument(target = "buzz_datastore", name = "enqueue_push_wake", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn enqueue_push_wake(
         &self,
         community: CommunityId,
@@ -1275,6 +1321,7 @@ impl Db {
     }
 
     /// Set-wise [`Self::enqueue_push_wake`]: one transaction per batch.
+    #[tracing::instrument(target = "buzz_datastore", name = "enqueue_push_wakes", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn enqueue_push_wakes(
         &self,
         community: CommunityId,
@@ -1284,6 +1331,7 @@ impl Db {
     }
 
     /// Exclusively claim due wake jobs for one community.
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_due_push_wakes", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_due_push_wakes(
         &self,
         community: CommunityId,
@@ -1294,6 +1342,7 @@ impl Db {
     }
 
     /// Revalidate a wake's claim, source event, and current lease before send.
+    #[tracing::instrument(target = "buzz_datastore", name = "revalidate_push_wake", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn revalidate_push_wake(
         &self,
         community: CommunityId,
@@ -1304,6 +1353,7 @@ impl Db {
     }
 
     /// Mark a fenced wake claim delivered.
+    #[tracing::instrument(target = "buzz_datastore", name = "complete_push_wake", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn complete_push_wake(
         &self,
         community: CommunityId,
@@ -1314,6 +1364,7 @@ impl Db {
     }
 
     /// Release a fenced wake claim for retry at the supplied time.
+    #[tracing::instrument(target = "buzz_datastore", name = "retry_push_wake", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn retry_push_wake(
         &self,
         community: CommunityId,
@@ -1325,6 +1376,7 @@ impl Db {
     }
 
     /// Mark a fenced wake claim terminally failed.
+    #[tracing::instrument(target = "buzz_datastore", name = "fail_push_wake", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn fail_push_wake(
         &self,
         community: CommunityId,
@@ -1335,6 +1387,7 @@ impl Db {
     }
 
     /// Disable an endpoint only if the specified lease generation is current.
+    #[tracing::instrument(target = "buzz_datastore", name = "disable_push_endpoint", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn disable_push_endpoint(
         &self,
         community: CommunityId,
@@ -1354,6 +1407,7 @@ impl Db {
 
     /// Atomically persist a validated kind:30350 event and its effective lease.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "accept_push_lease_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn accept_push_lease_event(
         &self,
         community: CommunityId,
@@ -1376,6 +1430,7 @@ impl Db {
     }
 
     /// Atomically insert an event AND its thread metadata in a single transaction.
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_event_with_thread_metadata", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_event_with_thread_metadata(
         &self,
         community_id: CommunityId,
@@ -1392,8 +1447,8 @@ impl Db {
         )
         .await?;
         if result.1 {
-            if let Err(e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
-                tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+            if let Err(_e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
+                tracing::warn!("mention insertion failed");
             }
         }
         Ok(result)
@@ -1401,6 +1456,7 @@ impl Db {
 
     /// Atomically insert a kind:7 reaction event and its reaction row.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_reaction_event_with_thread_metadata", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_reaction_event_with_thread_metadata(
         &self,
         community_id: CommunityId,
@@ -1426,8 +1482,8 @@ impl Db {
             was_inserted: true, ..
         } = &outcome
         {
-            if let Err(e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
-                tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+            if let Err(_e) = insert_mentions(&self.pool, community_id, event, channel_id).await {
+                tracing::warn!("mention insertion failed");
             }
         }
         Ok(outcome)
@@ -1435,6 +1491,7 @@ impl Db {
 
     /// Creates a new channel, bootstraps the creator as owner, and returns the record.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "create_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_channel(
         &self,
         community_id: CommunityId,
@@ -1462,6 +1519,7 @@ impl Db {
     ///
     /// Returns `(record, true)` if newly created, `(record, false)` if already exists.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "create_channel_with_id", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_channel_with_id(
         &self,
         community_id: CommunityId,
@@ -1488,6 +1546,7 @@ impl Db {
     }
 
     /// Fetches a channel record by ID.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_channel(
         &self,
         community_id: CommunityId,
@@ -1497,6 +1556,7 @@ impl Db {
     }
 
     /// Returns the canvas content for a channel, if any.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_canvas", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_canvas(
         &self,
         community_id: CommunityId,
@@ -1506,6 +1566,7 @@ impl Db {
     }
 
     /// Sets or clears the canvas content for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_canvas", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_canvas(
         &self,
         community_id: CommunityId,
@@ -1516,6 +1577,7 @@ impl Db {
     }
 
     /// Adds a member to a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "add_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn add_member(
         &self,
         community_id: CommunityId,
@@ -1536,6 +1598,7 @@ impl Db {
     }
 
     /// Removes a member from a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_member(
         &self,
         community_id: CommunityId,
@@ -1547,6 +1610,7 @@ impl Db {
     }
 
     /// Returns `true` if the pubkey is an active member.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_member(
         &self,
         community_id: CommunityId,
@@ -1558,6 +1622,7 @@ impl Db {
 
     /// Return the active (channel, pubkey) membership pairs among the given
     /// sets, in one statement.
+    #[tracing::instrument(target = "buzz_datastore", name = "membership_pairs", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn membership_pairs(
         &self,
         community_id: CommunityId,
@@ -1568,6 +1633,7 @@ impl Db {
     }
 
     /// Returns all active members of a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_members", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_members(
         &self,
         community_id: CommunityId,
@@ -1577,6 +1643,7 @@ impl Db {
     }
 
     /// Returns active members for multiple channels in a single query.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_members_bulk", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_members_bulk(
         &self,
         community_id: CommunityId,
@@ -1586,6 +1653,7 @@ impl Db {
     }
 
     /// Get all channel IDs accessible to a pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_accessible_channel_ids", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_accessible_channel_ids(
         &self,
         community_id: CommunityId,
@@ -1595,6 +1663,7 @@ impl Db {
     }
 
     /// Lists channels, optionally filtered by visibility.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_channels", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_channels(
         &self,
         community_id: CommunityId,
@@ -1604,6 +1673,7 @@ impl Db {
     }
 
     /// Returns full channel records for all channels a user can access.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_accessible_channels", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_accessible_channels(
         &self,
         community_id: CommunityId,
@@ -1622,6 +1692,7 @@ impl Db {
     }
 
     /// Returns all bot-role members with their aggregated channel names in one community.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_bot_members", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_bot_members(
         &self,
         community_id: CommunityId,
@@ -1630,6 +1701,7 @@ impl Db {
     }
 
     /// Bulk-fetch user records by pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_users_bulk", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_users_bulk(
         &self,
         community_id: CommunityId,
@@ -1639,6 +1711,7 @@ impl Db {
     }
 
     /// Updates a channel's name and/or description.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_channel(
         &self,
         community_id: CommunityId,
@@ -1649,6 +1722,7 @@ impl Db {
     }
 
     /// Sets the topic for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_topic", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_topic(
         &self,
         community_id: CommunityId,
@@ -1660,6 +1734,7 @@ impl Db {
     }
 
     /// Sets the purpose for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_purpose", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_purpose(
         &self,
         community_id: CommunityId,
@@ -1671,11 +1746,13 @@ impl Db {
     }
 
     /// Archives a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "archive_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn archive_channel(&self, community_id: CommunityId, channel_id: Uuid) -> Result<()> {
         channel::archive_channel(&self.pool, community_id, channel_id).await
     }
 
     /// Unarchives a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "unarchive_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn unarchive_channel(
         &self,
         community_id: CommunityId,
@@ -1685,6 +1762,7 @@ impl Db {
     }
 
     /// Soft-delete a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "soft_delete_channel", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn soft_delete_channel(
         &self,
         community_id: CommunityId,
@@ -1694,6 +1772,7 @@ impl Db {
     }
 
     /// Returns the count of active members in a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_member_count", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_member_count(
         &self,
         community_id: CommunityId,
@@ -1703,6 +1782,7 @@ impl Db {
     }
 
     /// Bulk-fetch member counts for a set of channel IDs.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_member_counts_bulk", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_member_counts_bulk(
         &self,
         community_id: CommunityId,
@@ -1712,6 +1792,7 @@ impl Db {
     }
 
     /// Get the active role of a pubkey in a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_member_role", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_member_role(
         &self,
         community_id: CommunityId,
@@ -1722,6 +1803,7 @@ impl Db {
     }
 
     /// Archive ephemeral channels whose TTL deadline has passed.
+    #[tracing::instrument(target = "buzz_datastore", name = "reap_expired_ephemeral_channels", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn reap_expired_ephemeral_channels(
         &self,
     ) -> Result<Vec<channel::ReapedEphemeralChannel>> {
@@ -1729,6 +1811,7 @@ impl Db {
     }
 
     /// Query due reminders ready for delivery.
+    #[tracing::instrument(target = "buzz_datastore", name = "query_due_reminders", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn query_due_reminders(
         &self,
         now_secs: i64,
@@ -1738,6 +1821,7 @@ impl Db {
     }
 
     /// Atomically claim a due reminder for delivery (cross-pod dedup).
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_due_reminder", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_due_reminder(
         &self,
         community_id: CommunityId,
@@ -1748,6 +1832,7 @@ impl Db {
     }
 
     /// Atomically claim a due reminder using a caller-supplied delivery stamp.
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_due_reminder_with_stamp", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_due_reminder_with_stamp(
         &self,
         community_id: CommunityId,
@@ -1766,6 +1851,7 @@ impl Db {
     }
 
     /// Release a claimed due reminder after a publish failure.
+    #[tracing::instrument(target = "buzz_datastore", name = "release_due_reminder", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn release_due_reminder(
         &self,
         community_id: CommunityId,
@@ -1788,11 +1874,13 @@ impl Db {
     /// Returns `true` if a new row was inserted (first time), `false` if it
     /// already existed. Callers use the `true` return to increment
     /// `buzz_users_created_total`.
+    #[tracing::instrument(target = "buzz_datastore", name = "ensure_user", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn ensure_user(&self, community_id: CommunityId, pubkey: &[u8]) -> Result<bool> {
         user::ensure_user(&self.pool, community_id, pubkey).await
     }
 
     /// Get a single user record by pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_user", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_user(
         &self,
         community_id: CommunityId,
@@ -1802,6 +1890,7 @@ impl Db {
     }
 
     /// Update a user's profile fields.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_user_profile", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_user_profile(
         &self,
         community_id: CommunityId,
@@ -1824,6 +1913,7 @@ impl Db {
     }
 
     /// Look up a user by NIP-05 handle.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_user_by_nip05", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_user_by_nip05(
         &self,
         community_id: CommunityId,
@@ -1834,6 +1924,7 @@ impl Db {
     }
 
     /// Search users by display name, NIP-05 handle, or pubkey prefix.
+    #[tracing::instrument(target = "buzz_datastore", name = "search_users", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn search_users(
         &self,
         community_id: CommunityId,
@@ -1845,6 +1936,7 @@ impl Db {
 
     /// Atomically set agent owner — only if no owner is currently assigned.
     /// Returns Ok(true) if set, Ok(false) if an owner already exists.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_agent_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_agent_owner(
         &self,
         community_id: CommunityId,
@@ -1855,6 +1947,7 @@ impl Db {
     }
 
     /// Get the channel_add_policy and agent_owner_pubkey for a user.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_agent_channel_policy", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_agent_channel_policy(
         &self,
         community_id: CommunityId,
@@ -1864,6 +1957,7 @@ impl Db {
     }
 
     /// Check whether `actor_pubkey` is the agent owner of `target_pubkey`.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_agent_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_agent_owner(
         &self,
         community_id: CommunityId,
@@ -1874,6 +1968,7 @@ impl Db {
     }
 
     /// Set the channel_add_policy for a user.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_channel_add_policy", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_channel_add_policy(
         &self,
         community_id: CommunityId,
@@ -1884,6 +1979,7 @@ impl Db {
     }
 
     /// Find an existing DM by its participant hash.
+    #[tracing::instrument(target = "buzz_datastore", name = "find_dm_by_participants", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn find_dm_by_participants(
         &self,
         community_id: CommunityId,
@@ -1893,6 +1989,7 @@ impl Db {
     }
 
     /// Create or return an existing DM channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "create_dm", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_dm(
         &self,
         community_id: CommunityId,
@@ -1903,6 +2000,7 @@ impl Db {
     }
 
     /// List all DMs for a user.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_dms_for_user", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_dms_for_user(
         &self,
         community_id: CommunityId,
@@ -1914,6 +2012,7 @@ impl Db {
     }
 
     /// Open or retrieve a DM for the given participants.
+    #[tracing::instrument(target = "buzz_datastore", name = "open_dm", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn open_dm(
         &self,
         community_id: CommunityId,
@@ -1927,6 +2026,7 @@ impl Db {
     ///
     /// The DM is not deleted — it can be restored by opening a new DM with
     /// the same participants.
+    #[tracing::instrument(target = "buzz_datastore", name = "hide_dm", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn hide_dm(
         &self,
         community_id: CommunityId,
@@ -1937,6 +2037,7 @@ impl Db {
     }
 
     /// Unhide a DM channel for a specific user.
+    #[tracing::instrument(target = "buzz_datastore", name = "unhide_dm", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn unhide_dm(
         &self,
         community_id: CommunityId,
@@ -1947,6 +2048,7 @@ impl Db {
     }
 
     /// List the channel IDs of all DMs the given user currently has hidden.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_hidden_dms", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_hidden_dms(
         &self,
         community_id: CommunityId,
@@ -1957,6 +2059,7 @@ impl Db {
 
     /// Insert thread metadata.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_thread_metadata", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_thread_metadata(
         &self,
         community_id: CommunityId,
@@ -2001,6 +2104,7 @@ impl Db {
     ///   the replica has not replayed (commit order is not `created_at`
     ///   order), so it is also re-run on the writer. Only a full page that
     ///   sits entirely at or below the fence is served from the replica.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_thread_replies", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_thread_replies(
         &self,
         community_id: CommunityId,
@@ -2041,6 +2145,7 @@ impl Db {
     }
 
     /// Fetch aggregated thread stats.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_thread_summary", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_thread_summary(
         &self,
         community_id: CommunityId,
@@ -2060,6 +2165,7 @@ impl Db {
     /// replayed on the replica ([`replica_fence`]). Pages whose cursor
     /// reaches above the fence — the freshest sliver of history — stay on
     /// the writer.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_channel_window", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_channel_window(
         &self,
         community_id: CommunityId,
@@ -2076,6 +2182,7 @@ impl Db {
     }
 
     /// Look up a single thread_metadata row by event_id.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_thread_metadata_by_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_thread_metadata_by_event(
         &self,
         community_id: CommunityId,
@@ -2085,6 +2192,7 @@ impl Db {
     }
 
     /// Decrement reply counts.
+    #[tracing::instrument(target = "buzz_datastore", name = "decrement_reply_count", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn decrement_reply_count(
         &self,
         community_id: CommunityId,
@@ -2096,6 +2204,7 @@ impl Db {
     }
 
     /// Add (or re-activate) a reaction.
+    #[tracing::instrument(target = "buzz_datastore", name = "add_reaction", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn add_reaction(
         &self,
         community: CommunityId,
@@ -2118,6 +2227,7 @@ impl Db {
     }
 
     /// Soft-delete a reaction.
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_reaction", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_reaction(
         &self,
         community: CommunityId,
@@ -2138,6 +2248,7 @@ impl Db {
     }
 
     /// Soft-delete a reaction by its source event ID.
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_reaction_by_source_event_id", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_reaction_by_source_event_id(
         &self,
         community: CommunityId,
@@ -2147,6 +2258,7 @@ impl Db {
     }
 
     /// Look up the active reaction row for one actor + emoji + target tuple.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_active_reaction_record", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_active_reaction_record(
         &self,
         community: CommunityId,
@@ -2167,6 +2279,7 @@ impl Db {
     }
 
     /// Backfill the source event ID on an active reaction row.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_reaction_event_id", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_reaction_event_id(
         &self,
         community: CommunityId,
@@ -2189,6 +2302,7 @@ impl Db {
     }
 
     /// Get all active reactions for an event, grouped by emoji.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_reactions", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_reactions(
         &self,
         community: CommunityId,
@@ -2209,6 +2323,7 @@ impl Db {
     }
 
     /// Batch-fetch emoji counts for a set of (event_id, event_created_at) pairs.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_reactions_bulk", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_reactions_bulk(
         &self,
         community: CommunityId,
@@ -2218,6 +2333,7 @@ impl Db {
     }
 
     /// Find events that @mention the given pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "query_feed_mentions", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn query_feed_mentions(
         &self,
         community: CommunityId,
@@ -2238,6 +2354,7 @@ impl Db {
     }
 
     /// Find events that require action from the given pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "query_feed_needs_action", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn query_feed_needs_action(
         &self,
         community: CommunityId,
@@ -2258,6 +2375,7 @@ impl Db {
     }
 
     /// Find recent activity across accessible channels.
+    #[tracing::instrument(target = "buzz_datastore", name = "query_feed_activity", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn query_feed_activity(
         &self,
         community: CommunityId,
@@ -2270,6 +2388,7 @@ impl Db {
 
     /// Create a new API token record.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "create_api_token", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_api_token(
         &self,
         community_id: CommunityId,
@@ -2295,6 +2414,7 @@ impl Db {
 
     /// Atomic conditional INSERT with 10-token limit (per (community, owner)).
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "create_api_token_if_under_limit", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_api_token_if_under_limit(
         &self,
         community_id: CommunityId,
@@ -2324,6 +2444,7 @@ impl Db {
     /// See [`api_token::get_api_token_by_hash_including_revoked`] for the
     /// row-44 conformance rationale — the `(community_id, token_hash)` key
     /// is enforced both by the storage UNIQUE index and by this WHERE clause.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_api_token_by_hash", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_api_token_by_hash(
         &self,
         community_id: CommunityId,
@@ -2349,6 +2470,7 @@ impl Db {
     }
 
     /// Look up an API token by hash, including revoked, scoped to community.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_api_token_by_hash_including_revoked", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_api_token_by_hash_including_revoked(
         &self,
         community_id: CommunityId,
@@ -2363,6 +2485,7 @@ impl Db {
     }
 
     /// Record a token usage (update `last_used_at`), scoped to community.
+    #[tracing::instrument(target = "buzz_datastore", name = "touch_api_token", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn touch_api_token(&self, community_id: CommunityId, hash: &[u8]) -> Result<()> {
         sqlx::query(
             "UPDATE api_tokens SET last_used_at = NOW() WHERE community_id = $1 AND token_hash = $2",
@@ -2384,6 +2507,7 @@ impl Db {
     }
 
     /// List all active (non-revoked) tokens in a community, newest first.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_active_tokens", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_active_tokens(&self, community_id: CommunityId) -> Result<Vec<TokenSummary>> {
         let rows = sqlx::query(
             r#"
@@ -2418,6 +2542,7 @@ impl Db {
     }
 
     /// List all tokens for a (community, owner) pair (including revoked).
+    #[tracing::instrument(target = "buzz_datastore", name = "list_tokens_by_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_tokens_by_owner(
         &self,
         community_id: CommunityId,
@@ -2427,6 +2552,7 @@ impl Db {
     }
 
     /// Revoke a single token by ID, scoped to (community, owner).
+    #[tracing::instrument(target = "buzz_datastore", name = "revoke_token", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn revoke_token(
         &self,
         community_id: CommunityId,
@@ -2445,6 +2571,7 @@ impl Db {
     }
 
     /// Revoke all active tokens for a (community, owner) pair.
+    #[tracing::instrument(target = "buzz_datastore", name = "revoke_all_tokens", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn revoke_all_tokens(
         &self,
         community_id: CommunityId,
@@ -2461,6 +2588,7 @@ impl Db {
     }
 
     /// Create a new workflow.
+    #[tracing::instrument(target = "buzz_datastore", name = "create_workflow", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_workflow(
         &self,
         community_id: CommunityId,
@@ -2484,6 +2612,7 @@ impl Db {
 
     /// Insert or update a workflow using its NIP-33 `d`-tag UUID.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "upsert_workflow", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn upsert_workflow(
         &self,
         community_id: CommunityId,
@@ -2508,6 +2637,7 @@ impl Db {
     }
 
     /// Fetch a single workflow by ID, scoped to its community.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_workflow", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_workflow(
         &self,
         community_id: CommunityId,
@@ -2517,6 +2647,7 @@ impl Db {
     }
 
     /// List workflows for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_channel_workflows", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_channel_workflows(
         &self,
         community_id: CommunityId,
@@ -2528,6 +2659,7 @@ impl Db {
     }
 
     /// List active, enabled workflows for a channel.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_enabled_channel_workflows", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_enabled_channel_workflows(
         &self,
         community_id: CommunityId,
@@ -2537,6 +2669,7 @@ impl Db {
     }
 
     /// List all active, enabled schedule-triggered workflows.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_all_enabled_workflows", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_all_enabled_workflows(&self) -> Result<Vec<workflow::WorkflowRecord>> {
         workflow::list_all_enabled_workflows(&self.pool).await
     }
@@ -2549,6 +2682,7 @@ impl Db {
     /// from the scheduler scan), never client-supplied — `workflows` is keyed
     /// `(community_id, id)`, so the claim must bind both to avoid fanning
     /// across communities that share the workflow UUID.
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_scheduled_workflow_fire", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_scheduled_workflow_fire(
         &self,
         community_id: CommunityId,
@@ -2565,6 +2699,7 @@ impl Db {
     }
 
     /// Fetch the latest claimed schedule instant for interval trigger anchoring.
+    #[tracing::instrument(target = "buzz_datastore", name = "latest_scheduled_workflow_fire", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn latest_scheduled_workflow_fire(
         &self,
         community_id: CommunityId,
@@ -2574,6 +2709,7 @@ impl Db {
     }
 
     /// Attach the workflow run id created from a won scheduled-fire claim.
+    #[tracing::instrument(target = "buzz_datastore", name = "attach_scheduled_workflow_run", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn attach_scheduled_workflow_run(
         &self,
         community_id: CommunityId,
@@ -2592,6 +2728,7 @@ impl Db {
     }
 
     /// Delete old scheduled workflow fire claims before a retention cutoff.
+    #[tracing::instrument(target = "buzz_datastore", name = "prune_scheduled_workflow_fires_before", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn prune_scheduled_workflow_fires_before(
         &self,
         older_than: chrono::DateTime<chrono::Utc>,
@@ -2600,6 +2737,7 @@ impl Db {
     }
 
     /// Update a workflow's name, definition, and hash.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_workflow", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_workflow(
         &self,
         community_id: CommunityId,
@@ -2620,6 +2758,7 @@ impl Db {
     }
 
     /// Update a workflow's status.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_workflow_status", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_workflow_status(
         &self,
         community_id: CommunityId,
@@ -2630,6 +2769,7 @@ impl Db {
     }
 
     /// Enable or disable a workflow.
+    #[tracing::instrument(target = "buzz_datastore", name = "set_workflow_enabled", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn set_workflow_enabled(
         &self,
         community_id: CommunityId,
@@ -2640,12 +2780,14 @@ impl Db {
     }
 
     /// Delete a workflow and all its runs/approvals.
+    #[tracing::instrument(target = "buzz_datastore", name = "delete_workflow", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn delete_workflow(&self, community_id: CommunityId, id: Uuid) -> Result<()> {
         workflow::delete_workflow(&self.pool, community_id, id).await
     }
 
     /// Delete a workflow only when it belongs to the provided owner.
     /// Returns the deleted workflow's `channel_id`.
+    #[tracing::instrument(target = "buzz_datastore", name = "delete_workflow_for_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn delete_workflow_for_owner(
         &self,
         community_id: CommunityId,
@@ -2657,6 +2799,7 @@ impl Db {
 
     /// Find a workflow by owner pubkey and name within a community. Used for
     /// NIP-09 a-tag deletion where the d-tag is the workflow name (not UUID).
+    #[tracing::instrument(target = "buzz_datastore", name = "find_workflow_by_owner_and_name", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn find_workflow_by_owner_and_name(
         &self,
         community_id: CommunityId,
@@ -2667,6 +2810,7 @@ impl Db {
     }
 
     /// Create a new workflow run.
+    #[tracing::instrument(target = "buzz_datastore", name = "create_workflow_run", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_workflow_run(
         &self,
         community_id: CommunityId,
@@ -2685,6 +2829,7 @@ impl Db {
     }
 
     /// Fetch a single workflow run, scoped to its community.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_workflow_run", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_workflow_run(
         &self,
         community_id: CommunityId,
@@ -2694,6 +2839,7 @@ impl Db {
     }
 
     /// List runs for a workflow.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_workflow_runs", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_workflow_runs(
         &self,
         community_id: CommunityId,
@@ -2704,6 +2850,7 @@ impl Db {
     }
 
     /// Update a workflow run's status.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_workflow_run", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_workflow_run(
         &self,
         community_id: CommunityId,
@@ -2726,11 +2873,13 @@ impl Db {
     }
 
     /// Create an approval request.
+    #[tracing::instrument(target = "buzz_datastore", name = "create_approval", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn create_approval(&self, params: workflow::CreateApprovalParams<'_>) -> Result<()> {
         workflow::create_approval(&self.pool, params).await
     }
 
     /// Fetch an approval by raw token.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_approval", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_approval(
         &self,
         community_id: CommunityId,
@@ -2740,6 +2889,7 @@ impl Db {
     }
 
     /// Fetch an approval by its already-hashed token (no re-hashing).
+    #[tracing::instrument(target = "buzz_datastore", name = "get_approval_by_stored_hash", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_approval_by_stored_hash(
         &self,
         community_id: CommunityId,
@@ -2749,6 +2899,7 @@ impl Db {
     }
 
     /// Fetch all approvals for a workflow run.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_run_approvals", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_run_approvals(
         &self,
         community_id: CommunityId,
@@ -2759,6 +2910,7 @@ impl Db {
     }
 
     /// Update an approval's status.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_approval", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_approval(
         &self,
         community_id: CommunityId,
@@ -2779,6 +2931,7 @@ impl Db {
     }
 
     /// Update an approval by its already-hashed token (no re-hashing).
+    #[tracing::instrument(target = "buzz_datastore", name = "update_approval_by_stored_hash", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_approval_by_stored_hash(
         &self,
         community_id: CommunityId,
@@ -2799,6 +2952,7 @@ impl Db {
     }
 
     /// Ensures monthly partitions exist for the next N months.
+    #[tracing::instrument(target = "buzz_datastore", name = "ensure_future_partitions", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn ensure_future_partitions(&self, months_ahead: u32) -> Result<()> {
         partition::ensure_future_partitions(&self.pool, months_ahead).await
     }
@@ -2807,6 +2961,7 @@ impl Db {
     ///
     /// Idempotent — safe to call on every startup. No-ops when all rows are already populated.
     /// Runs a single UPDATE touching only NIP-33 rows with NULL d_tag.
+    #[tracing::instrument(target = "buzz_datastore", name = "backfill_d_tags", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn backfill_d_tags(&self) -> Result<u64> {
         let result = sqlx::query(
             "UPDATE events \
@@ -2823,6 +2978,7 @@ impl Db {
     }
 
     /// Check if a pubkey is in the allowlist for `community`.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_pubkey_allowed", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_pubkey_allowed(&self, community: CommunityId, pubkey: &[u8]) -> Result<bool> {
         let row = sqlx::query(
             "SELECT COUNT(*) as cnt FROM pubkey_allowlist WHERE community_id = $1 AND pubkey = $2",
@@ -2836,6 +2992,7 @@ impl Db {
     }
 
     /// Check if the community allowlist has any entries (i.e. is enforcement active).
+    #[tracing::instrument(target = "buzz_datastore", name = "has_allowlist_entries", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn has_allowlist_entries(&self, community: CommunityId) -> Result<bool> {
         let row =
             sqlx::query("SELECT COUNT(*) as cnt FROM pubkey_allowlist WHERE community_id = $1")
@@ -2847,6 +3004,7 @@ impl Db {
     }
 
     /// Add a pubkey to the community allowlist.
+    #[tracing::instrument(target = "buzz_datastore", name = "add_to_allowlist", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn add_to_allowlist(
         &self,
         community: CommunityId,
@@ -2868,6 +3026,7 @@ impl Db {
     }
 
     /// Remove a pubkey from the community allowlist.
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_from_allowlist", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_from_allowlist(
         &self,
         community: CommunityId,
@@ -2883,6 +3042,7 @@ impl Db {
     }
 
     /// List all pubkeys in the community allowlist.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_allowlist", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_allowlist(&self, community: CommunityId) -> Result<Vec<AllowlistEntry>> {
         let rows = sqlx::query(
             "SELECT pubkey, added_by, added_at, note FROM pubkey_allowlist WHERE community_id = $1 ORDER BY added_at DESC",
@@ -2904,11 +3064,13 @@ impl Db {
     }
 
     /// Returns `true` if `pubkey` (64-char hex) is a member of `community`.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_relay_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_relay_member(&self, community: CommunityId, pubkey: &str) -> Result<bool> {
         relay_members::is_relay_member(&self.pool, community, pubkey).await
     }
 
     /// Returns the relay member record for `pubkey` in `community`, or `None` if not found.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_relay_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_relay_member(
         &self,
         community: CommunityId,
@@ -2918,6 +3080,7 @@ impl Db {
     }
 
     /// Returns all relay members of `community` ordered by `created_at` ascending.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_relay_members", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_relay_members(
         &self,
         community: CommunityId,
@@ -2929,6 +3092,7 @@ impl Db {
     ///
     /// Returns `true` if the row was actually inserted, `false` if the pubkey
     /// already existed in `community` (idempotent — `ON CONFLICT DO NOTHING`).
+    #[tracing::instrument(target = "buzz_datastore", name = "add_relay_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn add_relay_member(
         &self,
         community: CommunityId,
@@ -2941,6 +3105,7 @@ impl Db {
 
     /// Claims relay membership via an invite and atomically persists the
     /// accepted policy version when a policy is configured.
+    #[tracing::instrument(target = "buzz_datastore", name = "claim_relay_membership", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn claim_relay_membership(
         &self,
         community: CommunityId,
@@ -2953,6 +3118,7 @@ impl Db {
     }
 
     /// Returns whether a member has persisted acceptance evidence for a policy version.
+    #[tracing::instrument(target = "buzz_datastore", name = "has_join_policy_acceptance", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn has_join_policy_acceptance(
         &self,
         community: CommunityId,
@@ -2964,6 +3130,7 @@ impl Db {
     }
 
     /// Removes a relay member from `community` atomically, refusing to delete the owner.
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_relay_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_relay_member(
         &self,
         community: CommunityId,
@@ -2976,6 +3143,7 @@ impl Db {
     ///
     /// Atomic conditional delete — eliminates the TOCTOU race between a
     /// prior role read and the delete. See [`relay_members::remove_relay_member_if_role`].
+    #[tracing::instrument(target = "buzz_datastore", name = "remove_relay_member_if_role", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn remove_relay_member_if_role(
         &self,
         community: CommunityId,
@@ -2987,6 +3155,7 @@ impl Db {
     }
 
     /// Updates the role of an existing relay member in `community`. Returns `true` if updated.
+    #[tracing::instrument(target = "buzz_datastore", name = "update_relay_member_role", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn update_relay_member_role(
         &self,
         community: CommunityId,
@@ -2997,6 +3166,7 @@ impl Db {
     }
 
     /// Ensures the owner pubkey exists with role `"owner"` in `community`. Called at startup.
+    #[tracing::instrument(target = "buzz_datastore", name = "bootstrap_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn bootstrap_owner(&self, community: CommunityId, owner_pubkey: &str) -> Result<()> {
         relay_members::bootstrap_owner(&self.pool, community, owner_pubkey).await
     }
@@ -3005,6 +3175,7 @@ impl Db {
     /// demoting the previous owner(s) to `member`. Verifies
     /// `expected_owner_pubkey` matches the current owner inside the same
     /// transaction to prevent stale-owner races.
+    #[tracing::instrument(target = "buzz_datastore", name = "transfer_ownership", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn transfer_ownership(
         &self,
         community: CommunityId,
@@ -3024,11 +3195,13 @@ impl Db {
     ///
     /// Idempotent — uses `ON CONFLICT DO NOTHING`. Returns the number of rows
     /// inserted, or 0 if the `pubkey_allowlist` table doesn't exist.
+    #[tracing::instrument(target = "buzz_datastore", name = "backfill_from_allowlist", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn backfill_from_allowlist(&self, community: CommunityId) -> Result<u64> {
         relay_members::backfill_from_allowlist(&self.pool, community).await
     }
 
     /// Sidecar an accepted product-feedback event, idempotent by event id.
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_product_feedback", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_product_feedback(
         &self,
         community: CommunityId,
@@ -3038,6 +3211,7 @@ impl Db {
     }
 
     /// List product feedback across the deployment, newest first.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_product_feedback", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_product_feedback(
         &self,
         limit: i64,
@@ -3046,6 +3220,7 @@ impl Db {
     }
 
     /// Insert a tenant-scoped NIP-56 report row, idempotent by report event id.
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_moderation_report", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_moderation_report(
         &self,
         community: CommunityId,
@@ -3055,6 +3230,7 @@ impl Db {
     }
 
     /// List moderation reports for a community, newest first.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_moderation_reports", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_moderation_reports(
         &self,
         community: CommunityId,
@@ -3065,6 +3241,7 @@ impl Db {
     }
 
     /// Fetch one moderation report by row id.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_moderation_report", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_moderation_report(
         &self,
         community: CommunityId,
@@ -3074,6 +3251,7 @@ impl Db {
     }
 
     /// Fetch one moderation report by signed NIP-56 report event id.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_moderation_report_by_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_moderation_report_by_event(
         &self,
         community: CommunityId,
@@ -3083,6 +3261,7 @@ impl Db {
     }
 
     /// Resolve, dismiss, or escalate an open moderation report.
+    #[tracing::instrument(target = "buzz_datastore", name = "resolve_moderation_report", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn resolve_moderation_report(
         &self,
         community: CommunityId,
@@ -3103,6 +3282,7 @@ impl Db {
     }
 
     /// Upsert a community ban for a member pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "ban_community_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn ban_community_member(
         &self,
         community: CommunityId,
@@ -3115,6 +3295,7 @@ impl Db {
     }
 
     /// Lift a community ban for a member pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "unban_community_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn unban_community_member(
         &self,
         community: CommunityId,
@@ -3125,6 +3306,7 @@ impl Db {
     }
 
     /// Upsert a community timeout/write-block for a member pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "timeout_community_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn timeout_community_member(
         &self,
         community: CommunityId,
@@ -3137,6 +3319,7 @@ impl Db {
     }
 
     /// Clear a community timeout/write-block for a member pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "untimeout_community_member", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn untimeout_community_member(
         &self,
         community: CommunityId,
@@ -3147,6 +3330,7 @@ impl Db {
     }
 
     /// Fetch the active ban/timeout restriction state for enforcement hot paths.
+    #[tracing::instrument(target = "buzz_datastore", name = "moderation_restriction_state", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn moderation_restriction_state(
         &self,
         community: CommunityId,
@@ -3156,6 +3340,7 @@ impl Db {
     }
 
     /// Fetch the full ban/timeout row for a member pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "get_community_ban", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn get_community_ban(
         &self,
         community: CommunityId,
@@ -3165,6 +3350,7 @@ impl Db {
     }
 
     /// List currently restricted members in a community.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_community_restrictions", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_community_restrictions(
         &self,
         community: CommunityId,
@@ -3173,6 +3359,7 @@ impl Db {
     }
 
     /// Insert a moderation audit action row.
+    #[tracing::instrument(target = "buzz_datastore", name = "insert_moderation_action", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn insert_moderation_action(
         &self,
         community: CommunityId,
@@ -3182,6 +3369,7 @@ impl Db {
     }
 
     /// List moderation audit action rows, newest first.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_moderation_actions", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_moderation_actions(
         &self,
         community: CommunityId,
@@ -3192,6 +3380,7 @@ impl Db {
 
     /// Return the current owner of git repo name `repo_id` in `community`, or
     /// `None` if unreserved. See [`git_repo::repo_name_owner`].
+    #[tracing::instrument(target = "buzz_datastore", name = "repo_name_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn repo_name_owner(
         &self,
         community: CommunityId,
@@ -3204,6 +3393,7 @@ impl Db {
     ///
     /// See [`git_repo::reserve_repo_name`] for the outcome semantics. The
     /// per-pubkey quota is enforced by the caller against `count_repos_for_owner`.
+    #[tracing::instrument(target = "buzz_datastore", name = "reserve_repo_name", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn reserve_repo_name(
         &self,
         community: CommunityId,
@@ -3214,6 +3404,7 @@ impl Db {
     }
 
     /// Count git repos reserved by `owner_pubkey` in `community` (quota check).
+    #[tracing::instrument(target = "buzz_datastore", name = "count_repos_for_owner", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn count_repos_for_owner(
         &self,
         community: CommunityId,
@@ -3225,6 +3416,7 @@ impl Db {
     /// Release a git repo name reservation held by `owner_pubkey` (rollback).
     ///
     /// Returns the number of rows removed (0 or 1). See [`git_repo::release_repo_name`].
+    #[tracing::instrument(target = "buzz_datastore", name = "release_repo_name", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn release_repo_name(
         &self,
         community: CommunityId,
@@ -3235,12 +3427,14 @@ impl Db {
     }
 
     /// Returns `true` if `pubkey` (64-char hex) is archived in `community_id`.
+    #[tracing::instrument(target = "buzz_datastore", name = "is_archived", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn is_archived(&self, community_id: CommunityId, pubkey: &str) -> Result<bool> {
         archived_identities::is_archived(&self.pool, community_id, pubkey).await
     }
 
     /// Archives an identity in `community_id`. Returns `true` if inserted, `false` if already archived.
     #[allow(clippy::too_many_arguments)]
+    #[tracing::instrument(target = "buzz_datastore", name = "archive", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn archive(
         &self,
         community_id: CommunityId,
@@ -3265,11 +3459,13 @@ impl Db {
     }
 
     /// Unarchives an identity from `community_id`. Returns `true` if deleted, `false` if absent.
+    #[tracing::instrument(target = "buzz_datastore", name = "unarchive", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn unarchive(&self, community_id: CommunityId, pubkey: &str) -> Result<bool> {
         archived_identities::unarchive(&self.pool, community_id, pubkey).await
     }
 
     /// Returns all identities archived in `community_id`, ordered by archive time ascending.
+    #[tracing::instrument(target = "buzz_datastore", name = "list_archived", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn list_archived(
         &self,
         community_id: CommunityId,
@@ -3278,6 +3474,7 @@ impl Db {
     }
 
     /// Soft-delete NIP-29 discovery events for a channel created by a specific relay pubkey.
+    #[tracing::instrument(target = "buzz_datastore", name = "soft_delete_discovery_events", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn soft_delete_discovery_events(
         &self,
         community_id: CommunityId,
@@ -3303,6 +3500,7 @@ impl Db {
     /// Same-second ties are broken by lowest event `id` (NIP-16 deterministic ordering).
     /// Returns `(event, false)` for stale writes and duplicate IDs — callers should
     /// skip fan-out/dispatch when `was_inserted` is false.
+    #[tracing::instrument(target = "buzz_datastore", name = "replace_addressable_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn replace_addressable_event(
         &self,
         community_id: CommunityId,
@@ -3419,8 +3617,8 @@ impl Db {
 
         // Mentions are a denormalized index — safe outside the transaction.
         // insert_event() normally handles this, but we inlined the INSERT above.
-        if let Err(e) = crate::insert_mentions(&self.pool, community_id, event, channel_id).await {
-            tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+        if let Err(_e) = crate::insert_mentions(&self.pool, community_id, event, channel_id).await {
+            tracing::warn!("mention insertion failed");
         }
 
         Ok((
@@ -3485,6 +3683,7 @@ impl Db {
     /// prevents the stale-snapshot race where a concurrent publication reads
     /// older state and overwrites a newer snapshot by arrival order.
     ///
+    #[tracing::instrument(target = "buzz_datastore", name = "publish_nip43_membership_locked", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn publish_nip43_membership_locked(
         &self,
         community_id: CommunityId,
@@ -3593,8 +3792,8 @@ impl Db {
 
         tx.commit().await?;
 
-        if let Err(e) = crate::insert_mentions(&self.pool, community_id, &event, None).await {
-            tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+        if let Err(_e) = crate::insert_mentions(&self.pool, community_id, &event, None).await {
+            tracing::warn!("mention insertion failed");
         }
 
         Ok((
@@ -3625,6 +3824,7 @@ impl Db {
     /// relay-signed NIP-29 group metadata (kind 39000–39002) where the relay is the
     /// author and channel_id distinguishes groups. User-submitted NIP-33 events use
     /// this function instead, where the author's pubkey + d-tag is the natural key.
+    #[tracing::instrument(target = "buzz_datastore", name = "replace_parameterized_event", skip_all, fields(otel.kind = "client", db.system.name = "postgresql"))]
     pub async fn replace_parameterized_event(
         &self,
         community_id: CommunityId,
@@ -3830,8 +4030,8 @@ impl Db {
         tx.commit().await?;
 
         // Mentions are a denormalized index — safe outside the transaction.
-        if let Err(e) = crate::insert_mentions(&self.pool, community_id, event, channel_id).await {
-            tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+        if let Err(_e) = crate::insert_mentions(&self.pool, community_id, event, channel_id).await {
+            tracing::warn!("mention insertion failed");
         }
 
         Ok((
