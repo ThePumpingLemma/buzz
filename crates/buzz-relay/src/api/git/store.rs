@@ -31,6 +31,7 @@ use s3::creds::Credentials;
 use s3::error::S3Error;
 use s3::{Bucket, Region};
 use sha2::{Digest, Sha256};
+use tracing::Instrument;
 
 /// Opaque object-store ETag (used for `If-Match` on pointer CAS).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,6 +257,7 @@ impl GitStore {
     /// A1 detectability on read.
     ///
     /// Returns the key under which the object was written.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     async fn put_immutable(
         &self,
         prefix: &str,
@@ -296,6 +298,7 @@ impl GitStore {
     /// bytes. A 412 is idempotent success for the cache layer: the first writer
     /// already produced the sidecar for this pack, and hydrate validates before
     /// trusting it.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     pub async fn put_idx(&self, pack_digest: &str, idx_bytes: &[u8]) -> Result<String, StoreError> {
         let key = Self::idx_key_for_pack_digest(pack_digest)?;
         let mut headers = axum::http::HeaderMap::new();
@@ -349,6 +352,7 @@ impl GitStore {
     /// Prefer `get_verified` for pack/manifest reads — that is what enforces A1
     /// detectability. This raw `get` exists for the pointer (whose key is not a
     /// digest).
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.GetObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject"))]
     pub async fn get(&self, key: &str) -> Result<Bytes, StoreError> {
         match self.bucket.get_object(key).await {
             Ok(resp) => Ok(Bytes::from(resp.to_vec())),
@@ -409,10 +413,22 @@ impl GitStore {
 
     /// GET an object after rejecting bodies larger than `max_bytes`.
     pub async fn get_limited(&self, key: &str, max_bytes: u64) -> Result<Bytes, StoreError> {
-        let (head, status) = self.bucket.head_object(key).await.map_err(|e| match e {
-            S3Error::HttpFailWithBody(404, _) => StoreError::NotFound(key.into()),
-            other => StoreError::Backend(other),
-        })?;
+        let (head, status) = self
+            .bucket
+            .head_object(key)
+            .instrument(tracing::info_span!(
+                target: "buzz_datastore",
+                "S3.HeadObject",
+                otel.kind = "client",
+                rpc.system = "aws-api",
+                rpc.service = "S3",
+                rpc.method = "HeadObject"
+            ))
+            .await
+            .map_err(|e| match e {
+                S3Error::HttpFailWithBody(404, _) => StoreError::NotFound(key.into()),
+                other => StoreError::Backend(other),
+            })?;
         if status == 404 {
             return Err(StoreError::NotFound(key.into()));
         }
@@ -457,6 +473,7 @@ impl GitStore {
     /// never actually read. Reading both fields from the GET response keeps
     /// the snapshot consistent (A2: a single GET observes a single committed
     /// object). Verified empirically in `probe::probe_get_exposes_etag`.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.GetObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "GetObject"))]
     pub async fn get_pointer(&self, key: &str) -> Result<Option<(ETag, Bytes)>, StoreError> {
         match self.bucket.get_object(key).await {
             Ok(resp) => {
@@ -483,6 +500,7 @@ impl GitStore {
     /// Returns `CasOutcome::LostRace` on 412 (the standard losing outcome).
     /// On `CasOutcome::Won`, the returned `ETag` is read from the response
     /// headers — callers use it as the `If-Match` value for the next CAS.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     pub async fn put_pointer(
         &self,
         key: &str,
@@ -620,7 +638,11 @@ impl GitStore {
         // -- Phase 2: if_match_race -----------------------------------------------
         // Seed the pointer with a known value, then race N IfMatch updates.
         let seed = b"probe-pointer-seed".to_vec();
-        let _ = self.bucket.delete_object(&pointer_key).await; // ignore 404
+        let _ = self
+            .bucket
+            .delete_object(&pointer_key)
+            .instrument(tracing::info_span!(target: "buzz_datastore", "S3.DeleteObject", otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "DeleteObject"))
+            .await; // ignore 404
         let seed_outcome = self
             .put_pointer(&pointer_key, &seed, Precond::IfNoneMatchStar)
             .await?;
@@ -730,7 +752,11 @@ impl GitStore {
             let body = format!("probe-inm-race-{nonce}-{round}").into_bytes();
             let key = Self::content_key("probe/inm-race", &body);
             // Clean slate.
-            let _ = self.bucket.delete_object(&key).await;
+            let _ = self
+                .bucket
+                .delete_object(&key)
+                .instrument(tracing::info_span!(target: "buzz_datastore", "S3.DeleteObject", otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "DeleteObject"))
+                .await;
             let arc_self: Arc<&Self> = Arc::new(self);
             let mut tasks = Vec::with_capacity(cfg.race_width);
             for _ in 0..cfg.race_width {
@@ -873,7 +899,11 @@ impl GitStore {
 
         // Cleanup pointer (immutable probe writes accumulate by design; the
         // bucket's retention policy handles them, not the probe).
-        let _ = self.bucket.delete_object(&pointer_key).await;
+        let _ = self
+            .bucket
+            .delete_object(&pointer_key)
+            .instrument(tracing::info_span!(target: "buzz_datastore", "S3.DeleteObject", otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "DeleteObject"))
+            .await;
 
         Ok(ProbeReport {
             race_width: cfg.race_width,
@@ -892,6 +922,7 @@ impl GitStore {
     /// Raw create-only PUT exposed for the probe's race-counting phase, where
     /// we need to *see* 412 outcomes rather than swallow them as idempotent.
     /// Returns the HTTP status code on success-or-412; bubbles other errors.
+    #[tracing::instrument(target = "buzz_datastore", name = "S3.PutObject", skip_all, fields(otel.kind = "client", rpc.system = "aws-api", rpc.service = "S3", rpc.method = "PutObject"))]
     async fn put_immutable_raw(&self, key: &str, bytes: &[u8]) -> Result<u16, StoreError> {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(axum::http::header::IF_NONE_MATCH, "*".parse().unwrap());

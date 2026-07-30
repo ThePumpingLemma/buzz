@@ -35,3 +35,4 @@ futures-core = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }
