@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use buzz_audit::AuditService;
@@ -966,9 +967,11 @@ impl AppState {
     fn spawn_cache_invalidation(&self, tenant: &TenantContext, invalidation: CacheInvalidation) {
         let pubsub = Arc::clone(&self.pubsub);
         let tenant = tenant.clone();
+        let detached = tracing::info_span!(target: "buzz_datastore", "detached_cache_invalidation", otel.kind = "internal");
         tokio::spawn(async move {
             if let Err(e) = pubsub
                 .publish_cache_invalidation(&tenant, &invalidation)
+                .instrument(detached)
                 .await
             {
                 tracing::warn!("Failed to publish cache invalidation {invalidation:?}: {e}");
@@ -1041,8 +1044,13 @@ impl AppState {
         // durable ban row rejects the member again at auth. Community archival
         // is different: its API awaits publication and live sockets also have a
         // periodic durable-state revalidation backstop below.
+        let detached = tracing::info_span!(target: "buzz_datastore", "detached_conn_control", otel.kind = "internal");
         tokio::spawn(async move {
-            if let Err(e) = pubsub.publish_conn_control(&tenant, &command).await {
+            if let Err(e) = pubsub
+                .publish_conn_control(&tenant, &command)
+                .instrument(detached)
+                .await
+            {
                 tracing::warn!("Failed to publish conn-control disconnect: {e}");
             }
         });

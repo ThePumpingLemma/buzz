@@ -7,6 +7,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use nostr::JsonUtil;
 use tokio::sync::{broadcast, mpsc, Mutex};
+use tracing::Instrument as _;
 
 use crate::topic::EventTopicKey;
 use crate::ChannelEvent;
@@ -79,7 +80,10 @@ async fn connect_and_subscribe(
     subscription_rx: &mut mpsc::Receiver<SubscriptionCommand>,
 ) -> Result<(), redis::RedisError> {
     let client = redis::Client::open(redis_url)?;
-    let conn = client.get_async_pubsub().await?;
+    let conn = client
+        .get_async_pubsub()
+        .instrument(tracing::info_span!(target: "buzz_datastore", "CONNECT", otel.kind = "client", db.system.name = "redis", db.operation.name = "CONNECT"))
+        .await?;
     let (mut sink, mut stream) = conn.split();
     let mut active_topics = HashSet::new();
 
@@ -93,7 +97,9 @@ async fn connect_and_subscribe(
 
     for topic in initial_topics {
         let channel = topic.redis_channel();
-        sink.subscribe(&channel).await?;
+        sink.subscribe(&channel)
+            .instrument(tracing::info_span!(target: "buzz_datastore", "SUBSCRIBE", otel.kind = "client", db.system.name = "redis", db.operation.name = "SUBSCRIBE"))
+            .await?;
         active_topics.insert(channel);
     }
 
@@ -109,14 +115,18 @@ async fn connect_and_subscribe(
                     SubscriptionCommand::Subscribe(topic) => {
                         let channel = topic.redis_channel();
                         if active_topics.insert(channel.clone()) {
-                            sink.subscribe(&channel).await?;
+                            sink.subscribe(&channel)
+                                .instrument(tracing::info_span!(target: "buzz_datastore", "SUBSCRIBE", otel.kind = "client", db.system.name = "redis", db.operation.name = "SUBSCRIBE"))
+                                .await?;
                         }
                     }
                     SubscriptionCommand::UnsubscribeIfIdle(topic) => {
                         if desired_refcount(&desired_topics, topic).await == 0 {
                             let channel = topic.redis_channel();
                             if active_topics.remove(&channel) {
-                                sink.unsubscribe(&channel).await?;
+                                sink.unsubscribe(&channel)
+                                    .instrument(tracing::info_span!(target: "buzz_datastore", "UNSUBSCRIBE", otel.kind = "client", db.system.name = "redis", db.operation.name = "UNSUBSCRIBE"))
+                                    .await?;
                             }
                         }
                     }
