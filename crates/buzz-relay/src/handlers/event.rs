@@ -32,12 +32,15 @@ fn reject(reason: &'static str) {
 }
 
 /// Bound the `kind` label to prevent cardinality explosion from arbitrary Nostr kinds.
+///
+/// Ephemeral kinds are client-controlled across the entire 20000–29999 range,
+/// so they share one label rather than creating up to 10,000 counter series.
 pub(crate) fn bounded_kind_label(kind: u32) -> String {
     match kind {
         0..=9 | 1059 | 1063 => kind.to_string(),
         8000..=8003 | 9000..=9022 | 9030..=9036 => kind.to_string(),
         13534..=13535 => kind.to_string(),
-        20000..=29999 => kind.to_string(),
+        20000..=29999 => "ephemeral".to_string(),
         30023 | 30315 | 39000..=39003 => kind.to_string(),
         40002..=40100 => kind.to_string(),
         41001 | 41010..=41012 => kind.to_string(),
@@ -617,10 +620,9 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
         .record("kind", kind_u32);
 
     debug!(event_id = %event_id_hex, kind = kind_u32, "EVENT");
-    // Fleet-wide received counter: kind-only, no community tag.
-    // Rationale: bounded_kind_label passes through all 10k values in
-    // 20000..=29999 (client-controlled ephemeral range). Crossing kind ×
-    // community would produce up to millions of series. Keep kind fleet-wide.
+    // Fleet-wide received counter: kind-only, no community tag. Arbitrary
+    // client-controlled ephemeral kinds share one label; recognized persistent
+    // kinds retain their per-kind breakdown.
     metrics::counter!("buzz_events_received_total", "kind" => kind_str).increment(1);
     // Per-community volume counter: community-only, no kind tag.
     // Use this for per-community throughput graphs; the fleet counter above
@@ -1172,6 +1174,18 @@ mod tests {
     use tokio::sync::{mpsc, Mutex, RwLock};
     use tokio_util::sync::CancellationToken;
     use uuid::Uuid;
+
+    #[test]
+    fn bounded_kind_label_collapses_entire_ephemeral_range() {
+        for kind in 20000..=29999 {
+            assert_eq!(super::bounded_kind_label(kind), "ephemeral");
+        }
+        assert_eq!(
+            super::bounded_kind_label(KIND_STREAM_MESSAGE),
+            KIND_STREAM_MESSAGE.to_string()
+        );
+        assert_eq!(super::bounded_kind_label(65535), "other");
+    }
 
     #[test]
     fn fanout_event_frame_matches_legacy_format_byte_for_byte() {
